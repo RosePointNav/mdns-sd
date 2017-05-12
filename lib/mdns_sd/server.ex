@@ -8,18 +8,15 @@ defmodule MdnsSd.Server do
   use GenServer
   require Logger
 
-  @mdns_group {0xFF, 0x02, 0, 0, 0, 0, 0, 0xFB}
+  @mdns_group {0xFF02, 0, 0, 0, 0, 0, 0, 0xFB}
   @mdns_port 5353
   @ttl 120
-  @response_packet %DNS.Record{
-    header: %DNS.Header{
-      aa: true,
-      qr: true,
-      opcode: 0,
-      rcode: 0,
-      },
-      anlist: []
-    }
+  @response_header %DNS.Header{
+    aa: true,
+    qr: true,
+    opcode: 0,
+    rcode: 0,
+  }
 
   #Services is Map of %{{instance, domain}: %Service{}}
   defmodule State do
@@ -27,38 +24,40 @@ defmodule MdnsSd.Server do
   end
 
   defmodule Service do
-    defstruct [domain: "", txt: %{}, port: nil, ip: nil]
+    defstruct [domain: '', txt: %{}, port: nil, ip: nil]
   end
 
   def start_link(args \\ []) do
-    Logger.info "starting link"
     {:ok, pid} = GenServer.start_link(__MODULE__, args, name: Server)
-    Logger.info "pid is:"
-    Logger.info(inspect pid)
     {:ok, pid}
   end
 
   def init(_args) do
+    # multicast_addr = String.reverse <<0xFF, 0x02, 0::104, 0xFB>> #little endian
+    # ifindex = <<4::32-little>>
+    # ipproto_ipv6 = 41
+    # ipv6_join_group = 20
+
     udp_options = [
       :binary,
-      :inet6,
+      # :inet6,
       active: true,
-      # ip:    {0,0,0,0,0,0,0,0},
       # add_membership:  {{65282, 0, 0, 0, 0, 0, 0, 251}, {0,0,0,0,0,0,0,0}},
+      add_membership: {{224,0,0,251}, {0,0,0,0}},
       multicast_loop:  true,
       multicast_ttl:   255,
       reuseaddr:       true
     ]
     {:ok, pid} = :gen_udp.open(5353, udp_options)
-    Logger.info "udp res: #{res}"
-    {:ok, %State{}}
+    # :ok = :inet.setopts(pid, [{:raw, ipproto_ipv6, ipv6_join_group, multicast_addr <> ifindex}])
+    {:ok, %State{port: pid}}
   end
 
   def add_service({instance, type} = domain, service_to_add) do
     GenServer.call(Server, {:add_service, domain, service_to_add})
   end
 
-  def add_addr_record(domain, ip) do
+  def add_addr_record(domain, ip) when is_list(ip) do
     GenServer.call(Server, {:add_addr_record, domain, ip})
   end
 
@@ -66,11 +65,13 @@ defmodule MdnsSd.Server do
     {:noreply, handle_packet(packet, state)}
   end
 
-  def handle_call({:add_service, domain, service}, _, state) do
+  def handle_call({:add_service, {instance, dom} = domain, service}, _, state) do
     case Map.has_key?(state.services, domain) do
       true -> {:reply, {:error, :already_added}, state}
       false ->
         new_services = Map.put(state.services, domain, service)
+        [dns_resource('#{instance}.#{dom}', :ptr, service.domain)]
+        |> send_dns_response(state)
         {:reply, :ok, %{state | services: new_services}}
     end
   end
@@ -80,6 +81,7 @@ defmodule MdnsSd.Server do
       true -> {:reply, {:error, :already_added}, state}
       false ->
         new_addresses = Map.put(state.addresses, domain, ip)
+        send_dns_response [dns_resource(ip, :a, domain)], state
         {:reply, :ok, %{state | addresses: new_addresses}}
     end
   end
@@ -91,7 +93,7 @@ defmodule MdnsSd.Server do
 
   defp handle_query(false, _, state), do: state
   defp handle_query(true, record, state) do
-    Enum.flat_map(record.qrlist, fn query ->
+    Enum.flat_map(record.qdlist, fn query ->
       to_resources(query.type, query.domain, state)
     end)
     |> Enum.map(fn resources ->
@@ -99,9 +101,9 @@ defmodule MdnsSd.Server do
     end)
   end
 
-  defp to_resources(:aaaa, domain, state) do
+  defp to_resources(:a, domain, state) do
     case Map.fetch state.addresses, domain do
-      {:ok, ip} -> [dns_resource(ip, :aaaa, domain)]
+      {:ok, ip} -> [dns_resource(ip, :a, domain)]
       :error -> []
     end
   end
@@ -111,7 +113,7 @@ defmodule MdnsSd.Server do
     |> Enum.filter_map(fn {{_instance, domain}, _} ->
       domain == domain
     end, fn {instance, domain} ->
-      dns_resource("#{instance}.#{domain}", :ptr, domain)
+      dns_resource('#{instance}.#{domain}', :ptr, domain)
     end)
   end
 
@@ -123,6 +125,7 @@ defmodule MdnsSd.Server do
           "#{key}=#{val}"
         end)
         |> Enum.join("\n")
+        |> String.to_charlist
         |> dns_resource(:txt, domain)
         |> List.wrap
     else
@@ -135,7 +138,7 @@ defmodule MdnsSd.Server do
     with {instance, domain} <- parse_instance_and_dom(domain),
       service <- Map.fetch(state.services, {instance, domain}),
       port <- Map.fetch(service, :port) do
-        "#{domain} #{@ttl} IN SRV 0 0 #{port} #{service.domain}"
+        '#{domain} #{@ttl} IN SRV 0 0 #{port} #{service.domain}'
         |> dns_resource(:srv, domain)
         |> List.wrap
     else
@@ -158,14 +161,15 @@ defmodule MdnsSd.Server do
       type: type,
       ttl: @ttl,
       data: data,
-      domain: "#{domain}"
+      domain: '#{domain}'
     }
   end
 
   defp send_dns_response([], state), do: nil
   defp send_dns_response(answers, state) do
-    packet = %DNS.Record{@response_packet | :anlist => answers}
-    :gen_udp.send(state.udp_port, @mdns_group, @mdns_port, DNS.Record.encode(packet))
+    Logger.info inspect(answers)
+    packet = %DNS.Record{header: @response_header, anlist: answers}
+    :gen_udp.send(state.port, @mdns_group, @mdns_port, DNS.Record.encode(packet))
   end
 
 end
