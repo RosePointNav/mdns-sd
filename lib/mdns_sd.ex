@@ -5,7 +5,7 @@ defmodule MdnsSd do
   use Application
 
   defmodule Service do
-    defstruct [domain: nil, txt: %{}, port: 0, ip: nil]
+    defstruct [domain: '', txt: nil, port: 0]
   end
 
   def start(_type, _args) do
@@ -24,7 +24,8 @@ defmodule MdnsSd.Supervisor do
 
   def init(:ok) do
     children = [
-      worker(MdnsSd.Server, [])
+      worker(MdnsSd.Server, []),
+      worker(MdnsSd.Client, [])
     ]
 
     supervise(children, strategy: :one_for_one)

@@ -7,8 +7,9 @@ defmodule MdnsSd.Server do
   """
   use GenServer
   require Logger
+  import MdnsSd.Helpers
 
-  @mdns_group {0xFF02, 0, 0, 0, 0, 0, 0, 0xFB}
+  @mdns_group {224,0,0,251}#{0xFF02, 0, 0, 0, 0, 0, 0, 0xFB}
   @mdns_port 5353
   @ttl 120
   @response_header %DNS.Header{
@@ -28,8 +29,7 @@ defmodule MdnsSd.Server do
   end
 
   def start_link(args \\ []) do
-    {:ok, pid} = GenServer.start_link(__MODULE__, args, name: Server)
-    {:ok, pid}
+    GenServer.start_link(__MODULE__, args, name: Server)
   end
 
   def init(_args) do
@@ -89,6 +89,7 @@ defmodule MdnsSd.Server do
   defp handle_packet(packet, state) do
     record = DNS.Record.decode(packet)
     handle_query(record.header.qr, record, state)
+    state
   end
 
   defp handle_query(false, _, state), do: state
@@ -147,13 +148,6 @@ defmodule MdnsSd.Server do
     end
   end
   defp to_resources(_, _domain, _state), do: nil
-
-  defp parse_instance_and_dom(full_domain) do
-    case Regex.run(~r/^([^\.]*)\.(.*)$/, full_domain, capture: :all_but_first) do
-      [instance, domain] -> {instance, domain}
-      _ -> nil
-    end
-  end
 
   defp dns_resource(data, type, domain) do
     %DNS.Resource{
