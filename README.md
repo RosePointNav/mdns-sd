@@ -12,10 +12,7 @@ suppression or keep track of TTLs.
 
 ## Usage
 ### Server
-```
-Mdns.Server.add_service({service_instance, service_domain}, service)
-```
-(currently ipv4 only, eventually will be ipv6 configurable)
+currently ipv4 only, eventually will be ipv6 configurable
 ```
 Mdns.Server.add_service({service_instance, service_domain}, service)
 ```
