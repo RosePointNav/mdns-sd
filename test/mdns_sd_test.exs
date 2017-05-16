@@ -7,15 +7,15 @@ defmodule MdnsSdTest do
   end
 
   test "announcing a service" do
-    MdnsSd.Server.add_addr_record('foobar.local', '10.252.154.106')
     foo_service = %MdnsSd.Service{
-      domain: 'foobar.local',
+      domain: 'elixir-mdns-sd.local',
       txt: %{
-        'nmea-name' => 'FOOFOOFOO'
+        'nmeaname' => 'FOOFOOFOO'
       },
       port: 3000
     }
-    MdnsSd.Server.add_service({'fooinstance', '_pgn-transport._udp.local'}, foo_service)
+    MdnsSd.Server.add_service({'fooinstance', '_onenet-info._tcp'}, foo_service)
+    Process.sleep(3000)
     assert true
   end
 

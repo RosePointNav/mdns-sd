@@ -14,11 +14,18 @@ suppression or keep track of TTLs.
 ### Server
 currently ipv4 only, eventually will be ipv6 configurable
 ```
-Mdns.Server.add_service({service_instance, service_domain}, service)
+Mdns.Server.add_service({service_instance, service}, service)
 ```
-where `{service_instance, service_domain}` is something like
-`{"ff339870", "_onenet-pgn._tcp.local"}` and `service` is an `%MdnsSd.Service{}`
-struct whose domain has been registered via `add_addr_record`.
+where `{service_instance, service}` is something like
+`{"ff339870", "_onenet-pgn._tcp"}` and `service` is a hash such as:
+ ```
+ %{
+   port: 3000
+   txt: %{
+     'nmea-name' => 'foo'
+   }
+ }
+ ```
 
 ### Client
 ```

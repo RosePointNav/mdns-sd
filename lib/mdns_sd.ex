@@ -24,8 +24,8 @@ defmodule MdnsSd.Supervisor do
 
   def init(:ok) do
     children = [
-      worker(MdnsSd.Server, []),
-      worker(MdnsSd.Client, [])
+      worker(MdnsSd.Server, [])
+      # worker(MdnsSd.Client, [])
     ]
 
     supervise(children, strategy: :one_for_one)

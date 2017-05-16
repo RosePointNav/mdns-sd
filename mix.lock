@@ -1,2 +1,3 @@
 %{"dns": {:hex, :dns, "0.0.4", "2e347a0a03e8345bc70c6d69ed08788103a3bec81b93e4636b1b432110835436", [:mix], [{:socket, "~> 0.3.5", [hex: :socket, optional: false]}]},
+  "informant": {:hex, :informant, "0.1.0", "0e8e5c8e8758c746e16d7a47513a7f529d54bf29e51e42ef5b9fe009c3d2164d", [:mix], []},
   "socket": {:hex, :socket, "0.3.11", "46004230045c2207c0b90adb9abe3ba15a83e634b341ac37af39a4adf48ed00b", [:mix], []}}

@@ -11,7 +11,6 @@ defmodule Client do
   @informant MdnsSd
   @mdns_group {224,0,0,251}
   @mdns_port 5353
-  @ttl 120
   @query_header %DNS.Header{
     aa: true,
     qr: true,
@@ -46,17 +45,13 @@ defmodule Client do
     {:ok, %State{port: udp_pid}}
   end
 
-  def handle_info({:udp, _socket, _ip, _port, packet}, state) do
-    {:noreply, state}
-  end
-
   def listen(service_type) when is_list(service_type) do
     GenServer.call(Client, {:listen, service_type})
     Informant.subscribe(@informant, {service_type, :_})
   end
 
-  def handle_call({:listen, service_type}, {from,_}, state) do
-    if Enum.member? state.types service_type do
+  def handle_call({:listen, service_type}, _, state) do
+    if Enum.member? state.types, service_type do
       {:reply, :already_listening, state}
     else
       send_query(:ptr, service_type, state.port)
@@ -84,8 +79,8 @@ defmodule Client do
     state
   end
 
-  defp publish_changes(false = is_complete, _, _), do: nil
-  defp publish_changes(true, {instance_name, domain} = name, state) do
+  defp publish_changes(false = _complete?, _, _), do: nil
+  defp publish_changes(true, name, state) do
     %{data: data, informant: informant} = Map.fetch!(state.instances, name)
     new_state = %{data | ip: Map.get(state.domains, data.domain)}
     Informant.update(informant, new_state)
@@ -100,7 +95,7 @@ defmodule Client do
   defp handle_answer(:ptr, answer, {changed, state}) do
     with {instance, domain} = service_name <- parse_instance_and_dom(answer.data),
     true <- Enum.member?(state.types, domain),
-    false <- Map.has_key(state.instances, service_name) do
+    false <- Map.has_key?(state.instances, service_name) do
       send_queries([:txt, :srv], service_name, state.port)
       {:ok, informant} = Informant.publish(@informant, {domain, instance}, state: %{})
       instance = %Instance{informant: informant}
@@ -111,7 +106,7 @@ defmodule Client do
     end
   end
   defp handle_answer(:txt, answer, {changed, state}) do
-    with {instance, domain} = service_name <- parse_instance_and_dom(answer.domain),
+    with {_, domain} = service_name <- parse_instance_and_dom(answer.domain),
     true <- Enum.member?(state.types, domain),
     {:ok, existing_instance} <- Map.fetch(state.instances, service_name),
     {:ok, new_txt_map} <- parse_txt_map(answer.data) do
@@ -125,7 +120,7 @@ defmodule Client do
     end
   end
   defp handle_answer(:srv, answer, {changed, state}) do
-    with {instance, domain} = service_name <- parse_instance_and_dom(answer.domain),
+    with {_, domain} = service_name <- parse_instance_and_dom(answer.domain),
     true <- Enum.member?(state.types, domain),
     {:ok, existing_instance} <- Map.fetch(state.instances, service_name),
     {:ok, {port, srv_domain}} <- parse_srv_data(answer.data) do
@@ -134,8 +129,8 @@ defmodule Client do
       if Map.fetch(state.domains, srv_domain) == :error do
         send_query(:a, srv_domain, state.port)
       end
-      new_state = %{state | instances: new_instances}
-      {[service_name | changed]}
+      state = %{state | instances: new_instances}
+      {[service_name | changed], state}
     else
       true -> state
     end
@@ -153,7 +148,7 @@ defmodule Client do
     end
     {additional_changed ++ changed, %{state | domains: new_domains}}
   end
-  defp handle_answer(_, state), do: state
+  defp handle_answer(_, _, state), do: state
 
   defp send_queries(queries, domain, port) do
     Enum.map queries, &(send_query &1, domain, port)
