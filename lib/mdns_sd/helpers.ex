@@ -1,5 +1,12 @@
 defmodule MdnsSd.Helpers do
 
+  def parse_ip(data) do
+    case data do
+      <<oct_1, oct_2, oct_3, oct_4>> ->
+        {oct_1, oct_2, oct_3, oct_4}
+      {_,_,_,_} = ip -> ip
+    end
+  end
   def trunc_local(domain) do
     Regex.replace(~r/\.local$/, to_string(domain), "")
     |> String.to_charlist
@@ -12,16 +19,6 @@ defmodule MdnsSd.Helpers do
       |> Enum.map(& <<byte_size(&1)>> <> &1)
       |> Enum.join()
     domain_name <> <<0>>
-  end
-
-  def parse_instance_and_dom(full_domain) when is_list(full_domain) do
-    parse_instance_and_dom(List.to_string(full_domain))
-  end
-  def parse_instance_and_dom(full_domain) when is_binary(full_domain) do
-    case Regex.run(~r/^([^\.]*)\.(.*)$/, full_domain, capture: :all_but_first) do
-      [instance, domain] -> {to_charlist(instance), to_charlist(domain)}
-      _ -> nil
-    end
   end
 
   def parse_instance_and_service(full_domain) when is_list(full_domain) do
@@ -44,12 +41,10 @@ defmodule MdnsSd.Helpers do
     end
   end
 
-  def parse_txt_map(txt_charlist) do
-    to_string(txt_charlist)
-    |> String.split("\n")
-    |> Enum.map(fn line ->
-      case Regex.run(~r/^(.+)=(.+)$/, line, capture: :all_but_first) do
-        [key, val] -> {key, val}
+  def parse_txt_map(txt_list) do
+    Enum.map(txt_list, fn line ->
+      case Regex.run(~r/^(.+)=(.+)$/, to_string(line), capture: :all_but_first) do
+        [key, val] -> {to_charlist(key), to_charlist(val)}
         _ -> nil
       end
     end)

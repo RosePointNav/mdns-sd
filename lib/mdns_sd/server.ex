@@ -4,6 +4,7 @@ defmodule MdnsSd.Server do
   responds to queries for PTR, SRV, and TXT records
   #TODO
   -remove_service({instance, service_type})
+  -REVIEW: can I just supply a tuple as the SRV data? (see client.ex)
   """
   use GenServer
   require Logger
@@ -94,9 +95,7 @@ defmodule MdnsSd.Server do
   end
 
   defp to_resources(:a, domain, state) do
-    Logger.info "got A query: #{inspect domain}"
     if @domain == trunc_local(domain) do
-      Logger.info "responding to A query"
       [dns_resource(state.ip, :a, '#{@domain}.local')]
     else
       []

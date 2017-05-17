@@ -1,19 +1,19 @@
-defmodule Client do
+defmodule MdnsSd.Client do
   @moduledoc """
   queries services available over MDNS
   TODO
   -make sure query header contains the appropriate values
-  -Process.monitor listener
   """
   use GenServer
   import MdnsSd.Helpers
+  require Logger
 
   @informant MdnsSd
   @mdns_group {224,0,0,251}
   @mdns_port 5353
   @query_header %DNS.Header{
     aa: true,
-    qr: true,
+    qr: false,
     opcode: 0,
     rcode: 0,
   }
@@ -54,7 +54,7 @@ defmodule Client do
     if Enum.member? state.types, service_type do
       {:reply, :already_listening, state}
     else
-      send_query(:ptr, service_type, state.port)
+      send_query(:ptr, '#{service_type}.local', state.port)
       new_state = %{state | types: [service_type | state.types]}
       {:reply, :started_listening, new_state}
     end
@@ -69,13 +69,14 @@ defmodule Client do
     handle_response(record.header.qr, record, state)
   end
 
-  defp handle_response(_is_query = true, _, state), do: state
-  defp handle_response(false, record, state) do
-    {changed, state} = Enum.reduce(record.anlist, {[], state}, fn answer, {_changed, _state} = acc ->
+  defp handle_response(_is_resp = false, _, state), do: state
+  defp handle_response(true, record, state) do
+    arlist = Enum.map(record.arlist, &DNS.Resource.from_record/1)
+    {changed, state} = Enum.reduce(record.anlist ++ arlist, {[], state}, fn answer, {_, _} = acc ->
       handle_answer(answer.type, answer, acc)
     end)
     Enum.uniq(changed)
-    |> Enum.map(& publish_changes(is_complete(&1, state.domains), &1, state))
+    |> Enum.map(& publish_changes(is_complete(&1, state), &1, state))
     state
   end
 
@@ -86,58 +87,63 @@ defmodule Client do
     Informant.update(informant, new_state)
   end
 
-  defp is_complete(service, domains) do
-    empty = %Instance{}
-    service.txt != empty.txt && service.port != empty.port &&
-      Map.fetch(domains, service.domain) != :error
+  defp is_complete(instance_name, %{domains: domains, instances: instances}) do
+    case Map.fetch(instances, instance_name) do
+      {:ok, instance} ->
+        data = instance.data
+        empty = %Instance{}.data
+        data.txt != empty.txt && data.port != empty.port &&
+        Map.fetch(domains, data.domain) != :error
+      :error ->
+        false
+    end
   end
 
-  defp handle_answer(:ptr, answer, {changed, state}) do
-    with {instance, domain} = service_name <- parse_instance_and_dom(answer.data),
+  defp handle_answer(:ptr, answer, {changed, state} = acc) do
+    with {instance, domain} = service_name <- parse_instance_and_service(answer.data),
     true <- Enum.member?(state.types, domain),
     false <- Map.has_key?(state.instances, service_name) do
-      send_queries([:txt, :srv], service_name, state.port)
+      send_queries([:txt, :srv], '#{instance}.#{domain}.local', state.port)
       {:ok, informant} = Informant.publish(@informant, {domain, instance}, state: %{})
       instance = %Instance{informant: informant}
       new_instances = Map.put state.instances, service_name, instance
       {[service_name | changed], %{state | instances: new_instances}}
     else
-      true -> state
+      _ -> acc
     end
   end
-  defp handle_answer(:txt, answer, {changed, state}) do
-    with {_, domain} = service_name <- parse_instance_and_dom(answer.domain),
-    true <- Enum.member?(state.types, domain),
-    {:ok, existing_instance} <- Map.fetch(state.instances, service_name),
-    {:ok, new_txt_map} <- parse_txt_map(answer.data) do
-      new_data = Map.put(existing_instance.data, :txt, new_txt_map)
+  defp handle_answer(:txt, answer, {changed, state} = acc) do
+    with {_, service} = name <- parse_instance_and_service(answer.domain),
+    true <- Enum.member?(state.types, service),
+    {:ok, existing_instance} <- Map.fetch(state.instances, name) do
+      new_data = %{existing_instance.data | txt: parse_txt_map(answer.data)}
       new_instance = %{existing_instance | data: new_data}
-      new_instances = Map.put state.instances, service_name, new_instance
-      state = %{state | instances: new_instances}
-      {[service_name | changed], state}
+      new_instances = Map.put state.instances, name, new_instance
+      {[name | changed], %{state | instances: new_instances}}
     else
-      true -> state
+      _ -> acc
     end
   end
-  defp handle_answer(:srv, answer, {changed, state}) do
-    with {_, domain} = service_name <- parse_instance_and_dom(answer.domain),
-    true <- Enum.member?(state.types, domain),
-    {:ok, existing_instance} <- Map.fetch(state.instances, service_name),
-    {:ok, {port, srv_domain}} <- parse_srv_data(answer.data) do
+  defp handle_answer(:srv, answer, {changed, state} = acc) do
+    with {_, service} = name <- parse_instance_and_service(answer.domain),
+    true <- Enum.member?(state.types, service),
+    {:ok, existing_instance} <- Map.fetch(state.instances, name),
+    {_pri, _weight, port, srv_domain} <- answer.data do
       new_data = Map.merge(existing_instance.data, %{port: port, domain: srv_domain})
-      new_instances = Map.put state.instances, service_name, %{existing_instance | data: new_data}
+      new_instances = Map.put state.instances, name, %{existing_instance | data: new_data}
       if Map.fetch(state.domains, srv_domain) == :error do
         send_query(:a, srv_domain, state.port)
       end
       state = %{state | instances: new_instances}
-      {[service_name | changed], state}
+      {[name | changed], state}
     else
-      true -> state
+      _ -> acc
     end
   end
   defp handle_answer(:a, answer, {changed, state}) do
-    {changed?, new_domains} = Map.get_and_update state.domains, answer.domain, fn domain ->
-      {domain != nil && domain != answer.data, answer.data}
+    answer_ip = parse_ip(answer.data)
+    {changed?, new_domains} = Map.get_and_update state.domains, answer.domain, fn ip ->
+      {ip != nil && ip != answer_ip, answer_ip}
     end
     additional_changed = if changed? do
       Enum.filter_map(state.instances, fn {_name, instance} ->
@@ -148,7 +154,7 @@ defmodule Client do
     end
     {additional_changed ++ changed, %{state | domains: new_domains}}
   end
-  defp handle_answer(_, _, state), do: state
+  defp handle_answer(_, _, acc), do: acc
 
   defp send_queries(queries, domain, port) do
     Enum.map queries, &(send_query &1, domain, port)
