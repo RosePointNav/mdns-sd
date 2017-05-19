@@ -11,7 +11,6 @@ defmodule MdnsSd.Server do
   import MdnsSd.Helpers
 
   @domain 'elixir-mdns-sd'
-  @mdns_group {224,0,0,251}#{0xFF02, 0, 0, 0, 0, 0, 0, 0xFB}
   @mdns_port 5353
   @ttl 120
   @response_header %DNS.Header{
@@ -23,36 +22,23 @@ defmodule MdnsSd.Server do
 
   #Services is Map of %{{instance, domain}: %Service{}}
   defmodule State do
-    defstruct [services: %{}, port: nil, ip: nil]
+    defstruct [services: %{}, port: nil, ip: nil, protocol: nil]
   end
 
   defmodule Service do
     defstruct [domain: '', txt: %{}, port: nil, ip: nil]
   end
 
-  def start_link(args \\ []) do
+  def start_link(args) do
     GenServer.start_link(__MODULE__, args, name: Server)
   end
 
-  def init(_args) do
-    # multicast_addr = String.reverse <<0xFF, 0x02, 0::104, 0xFB>> #little endian
-    # ifindex = <<4::32-little>>
-    # ipproto_ipv6 = 41
-    # ipv6_join_group = 20
-
-    udp_options = [
-      :binary,
-      # :inet6,
-      active: true,
-      # add_membership:  {{65282, 0, 0, 0, 0, 0, 0, 251}, {0,0,0,0,0,0,0,0}},
-      add_membership: {{224,0,0,251}, {0,0,0,0}},
-      multicast_loop:  true,
-      multicast_ttl:   255,
-      reuseaddr:       true
-    ]
-    {:ok, pid} = :gen_udp.open(5353, udp_options)
-    # :ok = :inet.setopts(pid, [{:raw, ipproto_ipv6, ipv6_join_group, multicast_addr <> ifindex}])
-    state = %State{port: pid, ip: <<192,168,15,171>>}
+  def init(args) do
+    {:ok, pid} = case args[:protocol] do
+      :inet -> open_inet_port()
+      :inet6 -> open_inet6_port(Application.get_env :mdns_sd, :interface)
+    end
+    state = %State{port: pid, ip: args[:service_ip], protocol: args[:protocol]}
     broadcast_addr(state)
     {:ok, state}
   end
@@ -65,8 +51,11 @@ defmodule MdnsSd.Server do
     {:noreply, handle_packet(packet, state)}
   end
 
-  def broadcast_addr(state) do
+  def broadcast_addr(%{protocol: :inet} = state) do
     send_dns_response [dns_resource(state.ip, :a, @domain)], state
+  end
+  def broadcast_addr(%{protocol: :inet6} = state) do
+    send_dns_response [dns_resource(state.ip, :aaaa, @domain)], state
   end
 
   def handle_call({:add_service, {instance, service} = name, data}, _, state) do
@@ -94,9 +83,17 @@ defmodule MdnsSd.Server do
     end)
   end
 
-  defp to_resources(:a, domain, state) do
+  defp to_resources(:a, domain, %{protocol: :inet} = state) do
     if @domain == trunc_local(domain) do
       [dns_resource(state.ip, :a, '#{@domain}.local')]
+    else
+      []
+    end
+  end
+
+  defp to_resources(:aaaa, domain, %{protocol: :inet6} = state) do
+    if @domain == trunc_local(domain) do
+      [dns_resource(state.ip, :aaaa, '#{@domain}.local')]
     else
       []
     end
@@ -152,7 +149,7 @@ defmodule MdnsSd.Server do
   defp send_dns_response([], _state), do: nil
   defp send_dns_response(answers, state) do
     packet = %DNS.Record{header: @response_header, anlist: answers}
-    :gen_udp.send(state.port, @mdns_group, @mdns_port, DNS.Record.encode(packet))
+    :gen_udp.send(state.port, mdns_group(state.protocol), @mdns_port, DNS.Record.encode(packet))
   end
 
 end

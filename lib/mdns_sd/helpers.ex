@@ -1,12 +1,51 @@
 defmodule MdnsSd.Helpers do
 
-  def parse_ip(data) do
-    case data do
-      <<oct_1, oct_2, oct_3, oct_4>> ->
-        {oct_1, oct_2, oct_3, oct_4}
-      {_,_,_,_} = ip -> ip
-    end
+  def open_inet_port do
+    udp_options = [
+      :binary,
+      active: true,
+      add_membership: {{224,0,0,251}, {0,0,0,0}},
+      multicast_loop:  true,
+      multicast_ttl:   255,
+      reuseaddr:       true
+    ]
+    :gen_udp.open(5353, udp_options)
   end
+
+  #utility for opening an ipv6 udp port subscribed to provided address
+  #due to hard-coded headers and its reliance on ip link, only works on linux
+  def open_inet6_port(interface) do
+    ifindex_res = :os.cmd('ip link show #{interface}') |> to_string()
+    [ifindex] = Regex.run(~r/(^\d*):/, ifindex_res, capture: :all_but_first)
+    {ifindex, _} = Integer.parse(ifindex)
+
+    udp_options = [
+      :binary,
+      :inet6,
+      active: true,
+      reuseaddr: true
+    ]
+    {:ok, pid} = :gen_udp.open(5353, udp_options)
+
+    <<addr::128>> = <<0xFF02::16, 0::96, 0xFB::16>>
+    addr = <<addr::128-native>>
+    ifindex = <<ifindex::32-native>>
+    ipproto_ipv6 = 41
+    ipv6_join_group = 20
+    :ok = :inet.setopts(pid, [{:raw, ipproto_ipv6, ipv6_join_group, addr <> ifindex}])
+    {:ok, pid}
+  end
+
+  def mdns_group(:inet6), do: {0xFF02, 0, 0, 0, 0, 0, 0, 0xFB}
+  def mdns_group(:inet), do: {224,0,0,251}
+
+  def parse_ip(<<oct_1, oct_2, oct_3, oct_4>>), do: {oct_1, oct_2, oct_3, oct_4}
+  def parse_ip({_,_,_,_} = ip), do: ip
+  def parse_ip(<<s1::16, s2::16, s3::16, s4::16, s5::16, s6::16, s7::16, s8::16>>) do
+    {s1, s2, s3, s4, s5, s6, s7, s8}
+  end
+  def parse_ip({_,_,_,_,_,_,_,_} = ip), do: ip
+
   def trunc_local(domain) do
     Regex.replace(~r/\.local$/, to_string(domain), "")
     |> String.to_charlist
@@ -51,4 +90,5 @@ defmodule MdnsSd.Helpers do
     |> Enum.reject(&is_nil/1)
     |> Enum.into(%{})
   end
+
 end
