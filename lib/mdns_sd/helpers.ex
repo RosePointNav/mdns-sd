@@ -22,7 +22,7 @@ defmodule MdnsSd.Helpers do
       _ ->
         ifindex_res = :os.cmd('ip link show #{interface}') |> to_string()
         [ifindex] = Regex.run(~r/(^\d*):/, ifindex_res, capture: :all_but_first)
-        {ifindex, _} = Integer.parse(ifindex)
+        Integer.parse(ifindex) |> elem(0)
     end
     ifindex = <<ifindex::32-native>>
     ipproto_ipv6 = 41
