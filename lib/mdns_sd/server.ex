@@ -63,7 +63,11 @@ defmodule MdnsSd.Server do
       true -> {:reply, {:error, :already_added}, state}
       false ->
         new_services = Map.put(state.services, name, data)
-        [dns_resource('#{instance}.#{service}.local', :ptr, '#{@domain}.local')]
+        service_domain = '#{instance}.#{service}.local'
+        [ dns_resource(service_domain, :ptr, '#{@domain}.local'),
+          srv_resource(data.port, service_domain),
+          txt_resource(data.txt, service_domain)
+        ]
         |> send_dns_response(state)
         {:reply, :ok, %{state | services: new_services}}
     end
@@ -112,12 +116,7 @@ defmodule MdnsSd.Server do
     with {instance, service_name} <- parse_instance_and_service(domain),
       {:ok, service} <- Map.fetch(state.services, {instance, service_name}),
       {:ok, txt} <- Map.fetch(service, :txt) do
-        Enum.map(txt, fn {key, val} ->
-          {key, val} = {to_string(key), to_string(val)}
-          <<byte_size(key)>> <> key <> <<byte_size(val)>> <> val
-        end)
-        |> dns_resource(:txt, domain)
-        |> List.wrap
+        [txt_resource(txt, domain)]
     else
       _error -> []
     end
@@ -127,14 +126,26 @@ defmodule MdnsSd.Server do
     with {instance, service_name} <- parse_instance_and_service(q_domain),
       {:ok, service} <- Map.fetch(state.services, {instance, service_name}),
       {:ok, port} <- Map.fetch(service, :port) do
-        <<0::32>> <> <<port::16>> <> to_labels('#{@domain}.local')
-        |> dns_resource(:srv, q_domain)
-        |> List.wrap()
+        [srv_resource(port, q_domain)]
     else
       _error -> []
     end
   end
   defp to_resources(_, _domain, _state), do: []
+
+  #domain is suffixed with .local
+  defp srv_resource(port, domain) do
+    <<0::32>> <> <<port::16>> <> to_labels('#{@domain}.local')
+    |> dns_resource(:srv, domain)
+  end
+
+  defp txt_resource(txt_map, domain) do
+    Enum.map(txt_map, fn {key, val} ->
+      {key, val} = {to_string(key), to_string(val)}
+      <<byte_size(key)>> <> key <> <<byte_size(val)>> <> val
+    end)
+    |> dns_resource(:txt, domain)
+  end
 
   defp dns_resource(data, type, domain) do
     %DNS.Resource{

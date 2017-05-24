@@ -69,7 +69,7 @@ defmodule MdnsSd.Client do
       Enum.map(record.arlist, &DNS.Resource.from_record/1)
     rescue
       e in FunctionClauseError ->
-        Logger.warn "Error decoding additional response packet: #{Exception.format :error, e}"
+        # Logger.warn "Error decoding additional response packet: #{Exception.format :error, e}"
         []
     end
     {changed, state} = Enum.reduce(record.anlist ++ arlist, {[], state}, fn answer, {_, _} = acc ->
@@ -80,7 +80,8 @@ defmodule MdnsSd.Client do
     state
   end
 
-  defp publish_changes(false = _complete?, _, _), do: nil
+  defp publish_changes(false = _complete?, _, state), do: nil
+
   defp publish_changes(true, name, state) do
     %{data: data, informant: informant} = Map.fetch!(state.instances, name)
     new_state = %{data | ip: Map.get(state.domains, data.domain)}
@@ -132,7 +133,11 @@ defmodule MdnsSd.Client do
       new_data = Map.merge(existing_instance.data, %{port: port, domain: srv_domain})
       new_instances = Map.put state.instances, name, %{existing_instance | data: new_data}
       if Map.fetch(state.domains, srv_domain) == :error do
-        send_query(:a, srv_domain, state.port, state.protocol)
+        case state.protocol do
+          :inet -> :a
+          :inet6 -> :aaaa
+        end
+        |> send_query(srv_domain, state.port, state.protocol)
       end
       state = %{state | instances: new_instances}
       {[name | changed], state}
@@ -151,7 +156,7 @@ defmodule MdnsSd.Client do
   def register_ip(ip, domain, {changed, state}) do
     answer_ip = parse_ip(ip)
     {changed?, new_domains} = Map.get_and_update state.domains, domain, fn ip ->
-      {ip != nil && ip != answer_ip, answer_ip}
+      {ip == nil || ip != answer_ip, answer_ip}
     end
     additional_changed = if changed? do
       Enum.filter_map(state.instances, fn {_name, instance} ->

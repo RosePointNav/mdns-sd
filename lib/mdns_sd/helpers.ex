@@ -27,12 +27,10 @@ defmodule MdnsSd.Helpers do
     ]
     {:ok, pid} = :gen_udp.open(5353, udp_options)
 
-    <<addr::128>> = <<0xFF02::16, 0::96, 0xFB::16>>
-    addr = <<addr::128-native>>
     ifindex = <<ifindex::32-native>>
     ipproto_ipv6 = 41
     ipv6_join_group = 20
-    :ok = :inet.setopts(pid, [{:raw, ipproto_ipv6, ipv6_join_group, addr <> ifindex}])
+    :ok = :inet.setopts(pid, [{:raw, ipproto_ipv6, ipv6_join_group, address <> ifindex}])
     {:ok, pid}
   end
 
