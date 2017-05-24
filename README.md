@@ -39,10 +39,3 @@ receives a message:
   domain: 'johnnymac.local', ip: {192, 168, 15, 157}, port: 5000, txt:
   %{'url' => 'foorl'}}, nil}, []}
 ```
-
-## Caveats
-Currently, there are some limitations imposed by erlang's `:gen_udp` library.
-Right now, only works on linux since `:gen_udp`'s `reuseaddr` option doesn't seem
-to work properly on OS X. It's currently ipv4 only, since `:gen_udp` doesn't
-support joining ipv6 multicast groups. I'm working on incorporating a [manual workaround](http://stackoverflow.com/questions/38376640/cant-add-multicast-group), but
-it isn't pretty.
