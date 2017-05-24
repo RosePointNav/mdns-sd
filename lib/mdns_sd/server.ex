@@ -105,10 +105,17 @@ defmodule MdnsSd.Server do
 
   defp to_resources(:ptr, domain, state) do
     state.services
-    |> Enum.filter_map(fn {{_instance, service}, _} ->
-      service == trunc_local(domain)
-    end, fn {{instance, service}, _} ->
-      dns_resource('#{instance}.#{service}.local', :ptr, domain)
+    |> Enum.reduce([], fn {{instance, service_type}, service}, resources ->
+      if(service_type == trunc_local(domain)) do
+        service_domain = '#{instance}.#{service_type}.local'
+        resources ++ [
+          dns_resource(service_domain, :ptr, domain),
+          srv_resource(service.port, service_domain),
+          txt_resource(service.txt, service_domain)
+        ]
+      else
+        resources
+      end
     end)
   end
 
