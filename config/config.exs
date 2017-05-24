@@ -1,3 +1,3 @@
 use Mix.Config
 
-config :mdns_sd, interface: 'eth4', protocol: :inet6
+config :mdns_sd, interface: 'en0', protocol: :inet6, ifindex: 4

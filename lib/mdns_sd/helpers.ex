@@ -15,23 +15,35 @@ defmodule MdnsSd.Helpers do
   #utility for opening an ipv6 udp port subscribed to provided address
   #due to hard-coded headers and its reliance on ip link, only works on linux
   def open_inet6_port(interface) do
-    ifindex_res = :os.cmd('ip link show #{interface}') |> to_string()
-    [ifindex] = Regex.run(~r/(^\d*):/, ifindex_res, capture: :all_but_first)
-    {ifindex, _} = Integer.parse(ifindex)
+    address = <<0xFF02::16, 0::96, 0xFB::16>>
+    ifindex = case :os.type() do
+      {:unix, :darwin} ->
+        Application.get_env :mdns_sd, :ifindex
+      _ ->
+        ifindex_res = :os.cmd('ip link show #{interface}') |> to_string()
+        [ifindex] = Regex.run(~r/(^\d*):/, ifindex_res, capture: :all_but_first)
+        {ifindex, _} = Integer.parse(ifindex)
+    end
+    ifindex = <<ifindex::32-native>>
+    ipproto_ipv6 = 41
+    ipv6_join_group = 20
 
     udp_options = [
+      {:raw, ipproto_ipv6, ipv6_join_group, address <> ifindex},
       :binary,
       :inet6,
       active: true,
       reuseaddr: true
     ]
-    {:ok, pid} = :gen_udp.open(5353, udp_options)
-
-    ifindex = <<ifindex::32-native>>
-    ipproto_ipv6 = 41
-    ipv6_join_group = 20
-    :ok = :inet.setopts(pid, [{:raw, ipproto_ipv6, ipv6_join_group, address <> ifindex}])
-    {:ok, pid}
+    udp_options = case :os.type() do
+      {:unix, :darwin} ->
+        sol_socket = 0xffff
+        so_reuseport = 0x200
+        [{:raw, sol_socket, so_reuseport, <<1::32-native>>} | udp_options]
+      _ -> udp_options
+    end
+    res = :gen_udp.open(5353, udp_options)
+    res
   end
 
   def mdns_group(:inet6), do: {0xFF02, 0, 0, 0, 0, 0, 0, 0xFB}
