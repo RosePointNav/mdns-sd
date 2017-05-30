@@ -10,7 +10,7 @@ defmodule MdnsSd.Server do
   require Logger
   import MdnsSd.Helpers
 
-  @domain 'elixir-mdns-sd'
+  @defdomain 'elixir-mdns-sd'
   @mdns_port 5353
   @ttl 120
   @response_header %DNS.Header{
@@ -22,7 +22,7 @@ defmodule MdnsSd.Server do
 
   #Services is Map of %{{instance, domain}: %Service{}}
   defmodule State do
-    defstruct [services: %{}, port: nil, ip: nil, protocol: nil]
+    defstruct [services: %{}, port: nil, ip: nil, protocol: nil, domain: @defdomain]
   end
 
   defmodule Service do
@@ -38,7 +38,13 @@ defmodule MdnsSd.Server do
       :inet -> open_inet_port()
       :inet6 -> open_inet6_port(Application.get_env :mdns_sd, :interface)
     end
-    state = %State{port: pid, ip: args[:service_ip], protocol: args[:protocol]}
+    domain = Application.get_env(:mdns_sd, :domain, @defdomain)
+    state = %State{
+      port: pid,
+      ip: args[:service_ip],
+      protocol: args[:protocol],
+      domain: domain
+    }
     broadcast_addr(state)
     {:ok, state}
   end
@@ -52,10 +58,10 @@ defmodule MdnsSd.Server do
   end
 
   def broadcast_addr(%{protocol: :inet} = state) do
-    send_dns_response [dns_resource(state.ip, :a, @domain)], state
+    send_dns_response [dns_resource(state.ip, :a, state.domain)], state
   end
   def broadcast_addr(%{protocol: :inet6} = state) do
-    send_dns_response [dns_resource(state.ip, :aaaa, @domain)], state
+    send_dns_response [dns_resource(state.ip, :aaaa, state.domain)], state
   end
 
   def handle_call({:add_service, {instance, service} = name, data}, _, state) do
@@ -64,8 +70,8 @@ defmodule MdnsSd.Server do
       false ->
         new_services = Map.put(state.services, name, data)
         service_domain = '#{instance}.#{service}.local'
-        [ dns_resource(service_domain, :ptr, '#{@domain}.local'),
-          srv_resource(data.port, service_domain),
+        [ dns_resource(service_domain, :ptr, '#{state.domain}.local'),
+          srv_resource(data.port, service_domain, state.domain),
           txt_resource(data.txt, service_domain)
         ]
         |> send_dns_response(state)
@@ -88,16 +94,16 @@ defmodule MdnsSd.Server do
   end
 
   defp to_resources(:a, domain, %{protocol: :inet} = state) do
-    if @domain == trunc_local(domain) do
-      [dns_resource(state.ip, :a, '#{@domain}.local')]
+    if state.domain == trunc_local(domain) do
+      [dns_resource(state.ip, :a, '#{state.domain}.local')]
     else
       []
     end
   end
 
   defp to_resources(:aaaa, domain, %{protocol: :inet6} = state) do
-    if @domain == trunc_local(domain) do
-      [dns_resource(state.ip, :aaaa, '#{@domain}.local')]
+    if state.domain == trunc_local(domain) do
+      [dns_resource(state.ip, :aaaa, '#{state.domain}.local')]
     else
       []
     end
@@ -110,7 +116,7 @@ defmodule MdnsSd.Server do
         service_domain = '#{instance}.#{service_type}.local'
         resources ++ [
           dns_resource(service_domain, :ptr, domain),
-          srv_resource(service.port, service_domain),
+          srv_resource(service.port, service_domain, state.domain),
           txt_resource(service.txt, service_domain)
         ]
       else
@@ -133,7 +139,7 @@ defmodule MdnsSd.Server do
     with {instance, service_name} <- parse_instance_and_service(q_domain),
       {:ok, service} <- Map.fetch(state.services, {instance, service_name}),
       {:ok, port} <- Map.fetch(service, :port) do
-        [srv_resource(port, q_domain)]
+        [srv_resource(port, q_domain, state.domain)]
     else
       _error -> []
     end
@@ -141,8 +147,8 @@ defmodule MdnsSd.Server do
   defp to_resources(_, _domain, _state), do: []
 
   #domain is suffixed with .local
-  defp srv_resource(port, domain) do
-    <<0::32>> <> <<port::16>> <> to_labels('#{@domain}.local')
+  defp srv_resource(port, domain, our_domain) do
+    <<0::32>> <> <<port::16>> <> to_labels('#{our_domain}.local')
     |> dns_resource(:srv, domain)
   end
 
