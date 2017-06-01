@@ -84,7 +84,9 @@ defmodule MdnsSd.Client do
 
   defp publish_changes(true, name, state) do
     %{data: data, informant: informant} = Map.fetch!(state.instances, name)
-    new_state = %{data | ip: Map.get(state.domains, data.domain)}
+    new_state =
+      %{data | ip: Map.get(state.domains, data.domain)}
+      |> Map.from_struct()
     Informant.update(informant, new_state)
   end
 

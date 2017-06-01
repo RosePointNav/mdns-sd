@@ -154,8 +154,7 @@ defmodule MdnsSd.Server do
 
   defp txt_resource(txt_map, domain) do
     Enum.map(txt_map, fn {key, val} ->
-      {key, val} = {to_string(key), to_string(val)}
-      <<byte_size(key)>> <> key <> <<byte_size(val)>> <> val
+      '#{key}=#{val}'
     end)
     |> dns_resource(:txt, domain)
   end
