@@ -59,8 +59,14 @@ defmodule MdnsSd.Client do
   end
 
   defp handle_packet(packet, state) do
-    record = DNS.Record.decode(packet)
-    handle_response(record.header.qr, record, state)
+    try do
+      record = DNS.Record.decode(packet)
+      handle_response(record.header.qr, record, state)
+    rescue
+      exception ->
+        # Logger.warn Exception.format(:error, exception)
+        state
+    end
   end
 
   defp handle_response(_is_resp = false, _, state), do: state

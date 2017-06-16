@@ -53,6 +53,10 @@ defmodule MdnsSd.Server do
     GenServer.call(Server, {:add_service, domain, service_to_add})
   end
 
+  def remove_service({_instance, _type} = domain) do
+    GenServer.call(Server, {:remove_service, domain})
+  end
+
   def handle_info({:udp, _socket, _ip, _port, packet}, state) do
     {:noreply, handle_packet(packet, state)}
   end
@@ -79,9 +83,19 @@ defmodule MdnsSd.Server do
     end
   end
 
+  #TODO: implement
+  def handle_call({:remove_service, {instance, service} = name}, _, state) do
+    {:reply, :ok, state}
+  end
+
   defp handle_packet(packet, state) do
-    record = DNS.Record.decode(packet)
-    handle_query(record.header.qr, record, state)
+    try do
+      record = DNS.Record.decode(packet)
+      handle_query(record.header.qr, record, state)
+    rescue
+      exception ->
+        # Logger.warn Exception.format(:error, exception)
+    end
     state
   end
 
