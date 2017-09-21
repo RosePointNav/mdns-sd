@@ -44,6 +44,20 @@ defmodule MdnsSd.Client do
     Informant.subscribe(@informant, {service_type, :_})
   end
 
+  def lookup(service_type, application_id) do
+    GenServer.call(Client, {:lookup, service_type, application_id})
+  end
+
+  def handle_call({:lookup, service_type, application_id}, _, %State{instances: instances} = state) do
+    case Map.fetch(instances, {application_id, service_type}) do
+      :error ->
+        # Do a resolve request?
+        {:reply, nil, state}
+      {:ok, instance} ->
+        {:reply, instance, state}
+    end
+  end
+
   def handle_call({:listen, service_type}, _, state) do
     if Enum.member? state.types, service_type do
       {:reply, :already_listening, state}
