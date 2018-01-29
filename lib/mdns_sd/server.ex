@@ -83,9 +83,18 @@ defmodule MdnsSd.Server do
     end
   end
 
-  #TODO: implement
   def handle_call({:remove_service, {instance, service} = name}, _, state) do
-    {:reply, :ok, state}
+    case Map.has_key?(state.services, name) do
+      true ->
+        service_domain = '#{instance}.#{service}.local'
+        new_services =
+          state.services
+          |> Map.delete(name)
+        send_dns_response [dns_resource(service_domain, :ptr, '#{state.domain}.local', 0)], state
+        {:reply, :ok, %{state | services: new_services}}
+      false ->
+        {:reply, {:error, :not_found}, state}
+    end
   end
 
   defp handle_packet(packet, state) do
@@ -173,11 +182,11 @@ defmodule MdnsSd.Server do
     |> dns_resource(:txt, domain)
   end
 
-  defp dns_resource(data, type, domain) do
+  defp dns_resource(data, type, domain, ttl \\ @ttl) do
     %DNS.Resource{
       class: :in,
       type: type,
-      ttl: @ttl,
+      ttl: ttl,
       data: data,
       domain: domain
     }
@@ -190,3 +199,4 @@ defmodule MdnsSd.Server do
   end
 
 end
+
